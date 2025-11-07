@@ -1068,7 +1068,7 @@ class RecoveryManagerApp(tk.Tk):
         r += 1
         
         # 第三行：设备类别/品牌型号
-        tk.Label(details_frame, text="设备类别/品牌型号:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text="类别/品牌型号:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
         device_parts = [p for p in [device_category, device_info] if p]
         device_info_text = '/'.join(device_parts) if device_parts else ''
         tk.Label(details_frame, text=device_info_text, anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
@@ -1126,7 +1126,7 @@ class RecoveryManagerApp(tk.Tk):
         
         r = 0
         # 第一列
-        tk.Label(edit_frame, text="最终实收", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        tk.Label(edit_frame, text="实收金额", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
         final_price_entry = tk.Entry(edit_frame)
         final_price_entry.insert(0, str(final_price))
         final_price_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
@@ -1140,7 +1140,7 @@ class RecoveryManagerApp(tk.Tk):
         r += 1
         
         # 第一列
-        tk.Label(edit_frame, text="配件成本(¥)", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        tk.Label(edit_frame, text="配件成本", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
         part_cost_entry = tk.Entry(edit_frame)
         part_cost_entry.insert(0, str(part_cost))
         part_cost_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
@@ -1166,7 +1166,7 @@ class RecoveryManagerApp(tk.Tk):
         r += 1
         
         # 第一列
-        tk.Label(edit_frame, text="开票金额(¥)", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        tk.Label(edit_frame, text="开票金额", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
         invoice_amount_entry = tk.Entry(edit_frame)
         invoice_amount_entry.insert(0, str(invoice_amount or 0))
         invoice_amount_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
