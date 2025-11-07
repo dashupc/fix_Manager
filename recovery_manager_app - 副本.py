@@ -16,10 +16,8 @@ import threading
 import time as time_module
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import webbrowser
 
 from dateutil.relativedelta import relativedelta
-import pystray
 
 # 配置日志系统（必须在其他导入之前）
 LOG_FILE = 'app.log'
@@ -41,7 +39,8 @@ except ImportError:
     PIL_AVAILABLE = False
     logger.warning("PIL/Pillow 未安装，系统托盘图标功能将不可用")
 
- 
+import pystray
+import webbrowser 
 
 
 DATABASE_NAME = 'recovery_manager.db'
@@ -95,14 +94,6 @@ class DatabaseManager:
         self._add_missing_column('job_orders', 'part_source', "TEXT")
         self._add_missing_column('job_orders', 'part_cost', "REAL DEFAULT 0.0")
         self._add_missing_column('job_orders', 'fault_type', "TEXT")
-        self._add_missing_column('job_orders', 'device_category', "TEXT")
-        self._add_missing_column('job_orders', 'invoice_amount', "REAL DEFAULT 0.0")
-        self._add_missing_column('job_orders', 'invoice_date', "TEXT")
-        self._add_missing_column('job_orders', 'is_urgent', "INTEGER DEFAULT 0")
-        
-        # 为 clients 表添加单位和部门字段
-        self._add_missing_column('clients', 'unit', 'TEXT')
-        self._add_missing_column('clients', 'department', 'TEXT')
 
         # financial_records 表
         self.cursor.execute('''
@@ -238,10 +229,6 @@ class RecoveryManagerApp(tk.Tk):
         
         self.menubar.add_command(label="关于", command=self.show_about)
         self.menubar.add_command(label="隐藏到托盘", command=self.minimize_to_tray)
-        
-        # 配置标签页样式：加大加粗字号
-        style = ttk.Style()
-        style.configure('TNotebook.Tab', font=('Arial', 12, 'bold'))
         
         # 使用 ttk notebook (标签页)
         self.notebook = ttk.Notebook(self)
@@ -902,10 +889,10 @@ class RecoveryManagerApp(tk.Tk):
             'client_name': '客户姓名', 
             'phone': '联系电话', 
             'serial_number': '序列号', 
-            'device': '品牌型号', 
+            'device': '设备信息', 
             'fault_desc': '故障描述', 
             'status': '状态', 
-            'quote': '报价', 
+            'quote': '初步报价(¥)', 
             'created_at': '创建日期'
         }
         self.job_tree = ttk.Treeview(job_frame, columns=columns, show='headings')
@@ -918,8 +905,6 @@ class RecoveryManagerApp(tk.Tk):
         self.job_tree.column('serial_number', width=100)
         self.job_tree.column('device', width=150)
         self.job_tree.column('fault_desc', width=200)
-        self.job_tree.column('status', width=50, anchor='center')
-        self.job_tree.column('quote', width=50, anchor='center')
         
         # 配置标签颜色：非完成状态=红色
         self.job_tree.tag_configure('other', background='#FFF0F0', foreground='red')
@@ -999,11 +984,11 @@ class RecoveryManagerApp(tk.Tk):
         
         query = '''
             SELECT 
-                j.id, c.name, c.phone, c.unit, c.department, j.serial_number,
-                j.device_info, j.device_category, j.fault_type, j.fault_desc, j.repair_details, j.status, 
+                j.id, c.name, c.phone, j.serial_number,
+                j.device_info, j.fault_type, j.fault_desc, j.repair_details, j.status, 
                 j.initial_quote, j.final_price, j.cost, j.other_cost, 
                 j.payment_method, j.payment_notes, j.replaced_parts, 
-                j.part_source, j.part_cost, j.invoice_amount, j.invoice_date, j.is_urgent, j.created_at
+                j.part_source, j.part_cost, j.created_at
             FROM job_orders j
             JOIN clients c ON j.client_id = c.id
             WHERE j.id = ?
@@ -1013,18 +998,15 @@ class RecoveryManagerApp(tk.Tk):
             messagebox.showerror("错误", f"无法找到工单 ID: {job_id} 的详细信息。")
             return
             
-        (job_id, client_name, client_phone, client_unit, client_department, serial_number,
-         device_info, device_category, fault_type, fault_desc, repair_details, status, 
+        (job_id, client_name, client_phone, serial_number,
+         device_info, fault_type, fault_desc, repair_details, status, 
          initial_quote, final_price, cost, other_cost, 
          payment_method, payment_notes, replaced_parts, 
-         part_source, part_cost, invoice_amount, invoice_date, is_urgent, created_at) = details
+         part_source, part_cost, created_at) = details
          
         replaced_parts = replaced_parts or ''
         part_source = part_source or ''
         part_cost = part_cost or 0.0
-        invoice_amount = invoice_amount or 0.0
-        invoice_date = invoice_date or ''
-        is_urgent = is_urgent or 0  # 确保有默认值
          
         net_profit = final_price - cost - other_cost - part_cost
         
@@ -1039,7 +1021,7 @@ class RecoveryManagerApp(tk.Tk):
 
         def add_detail_row(parent, label_text, value, row, color=None, font=None):
             tk.Label(parent, text=label_text, anchor="w", justify=tk.LEFT, font=('Arial', 10, 'bold')).grid(row=row, column=0, padx=5, pady=2, sticky="w")
-            tk.Label(parent, text=str(value) if value else '', anchor="w", justify=tk.LEFT, fg=color, font=font, wraplength=350).grid(row=row, column=1, padx=5, pady=2, sticky="w")
+            tk.Label(parent, text=str(value) if value else 'N/A', anchor="w", justify=tk.LEFT, fg=color, font=font, wraplength=350).grid(row=row, column=1, padx=5, pady=2, sticky="w")
 
         details_frame = ttk.LabelFrame(main_frame, text="工单与客户信息")
         details_frame.pack(fill="x", pady=5)
@@ -1047,43 +1029,25 @@ class RecoveryManagerApp(tk.Tk):
         details_frame.columnconfigure(3, weight=1)
 
         r = 0
-        # 第一行：工单 ID
+        # 第一列
         tk.Label(details_frame, text="工单 ID:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
-        job_id_frame = tk.Frame(details_frame)
-        job_id_frame.grid(row=r, column=1, padx=5, pady=2, sticky="w")
-        tk.Label(job_id_frame, text=str(job_id) if job_id else '', anchor="w", wraplength=200).pack(side="left")
-        if is_urgent:
-            tk.Label(job_id_frame, text="紧急", anchor="w", font=('Arial', 10, 'bold'), fg='red').pack(side="left", padx=(10, 0))
+        tk.Label(details_frame, text=str(job_id) if job_id else 'N/A', anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text="客户:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text=str(client_name) if client_name else 'N/A', anchor="w", wraplength=200).grid(row=r, column=3, padx=5, pady=2, sticky="w")
         r += 1
         
-        # 第二行：联系人/电话 和 单位/部门
-        tk.Label(details_frame, text="联系人/电话:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
-        contact_parts = [p for p in [client_name, client_phone] if p]
-        contact_info = '/'.join(contact_parts) if contact_parts else ''
-        tk.Label(details_frame, text=contact_info, anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
-        tk.Label(details_frame, text="单位/部门:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=2, sticky="w")
-        unit_dept_parts = [p for p in [client_unit, client_department] if p]
-        unit_dept_info = '/'.join(unit_dept_parts) if unit_dept_parts else ''
-        tk.Label(details_frame, text=unit_dept_info, anchor="w", wraplength=200).grid(row=r, column=3, padx=5, pady=2, sticky="w")
-        r += 1
-        
-        # 第三行：设备类别/品牌型号
-        tk.Label(details_frame, text="设备类别/品牌型号:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
-        device_parts = [p for p in [device_category, device_info] if p]
-        device_info_text = '/'.join(device_parts) if device_parts else ''
-        tk.Label(details_frame, text=device_info_text, anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text="电话:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text=str(client_phone) if client_phone else 'N/A', anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
         tk.Label(details_frame, text="序列号:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=2, sticky="w")
-        tk.Label(details_frame, text=str(serial_number) if serial_number else '', anchor="w", wraplength=200).grid(row=r, column=3, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text=str(serial_number) if serial_number else 'N/A', anchor="w", wraplength=200).grid(row=r, column=3, padx=5, pady=2, sticky="w")
         r += 1
         
-        # 第四行：故障类型 和 工单状态
+        tk.Label(details_frame, text="设备:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
+        tk.Label(details_frame, text=str(device_info) if device_info else 'N/A', anchor="w", wraplength=200).grid(row=r, column=1, columnspan=3, padx=5, pady=2, sticky="w")
+        r += 1
+        
         tk.Label(details_frame, text="故障类型:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=2, sticky="w")
-        tk.Label(details_frame, text=str(fault_type) if fault_type else '', anchor="w", wraplength=200).grid(row=r, column=1, padx=5, pady=2, sticky="w")
-        tk.Label(details_frame, text="工单状态:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=2, sticky="w")
-        status_var = tk.StringVar(value=status)
-        statuses = ['待检测', '检测中', '报价中', '维修中', '完成', '取消']
-        status_menu = ttk.Combobox(details_frame, textvariable=status_var, values=statuses, state="readonly", width=18)
-        status_menu.grid(row=r, column=3, padx=5, pady=2, sticky="ew")
+        tk.Label(details_frame, text=str(fault_type) if fault_type else 'N/A', anchor="w", wraplength=200).grid(row=r, column=1, columnspan=3, padx=5, pady=2, sticky="w")
         
         desc_frame = ttk.LabelFrame(main_frame, text="故障描述")
         desc_frame.pack(fill="x", pady=5)
@@ -1099,51 +1063,32 @@ class RecoveryManagerApp(tk.Tk):
         edit_repair_details.insert(tk.END, repair_details if repair_details else "")
         edit_repair_details.pack(fill="x", padx=5, pady=3)
         
-        # 配件信息
-        parts_frame = ttk.LabelFrame(main_frame, text="配件信息")
-        parts_frame.pack(fill="x", pady=5)
-        parts_frame.columnconfigure(1, weight=1)
-        parts_frame.columnconfigure(3, weight=1)
-        
-        r = 0
-        tk.Label(parts_frame, text="更换配件:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
-        parts_list = self.load_parts()
-        replaced_parts_var = tk.StringVar(value=replaced_parts)
-        replaced_parts_combo = ttk.Combobox(parts_frame, textvariable=replaced_parts_var, values=parts_list, state="normal", width=18)
-        replaced_parts_combo.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
-        
-        tk.Label(parts_frame, text="配件来源:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
-        sources_list = self.load_part_sources()
-        part_source_var = tk.StringVar(value=part_source)
-        part_source_combo = ttk.Combobox(parts_frame, textvariable=part_source_var, values=sources_list, state="normal", width=18)
-        part_source_combo.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
-        r += 1
-        
-        edit_frame = ttk.LabelFrame(main_frame, text="财务信息")
+        edit_frame = ttk.LabelFrame(main_frame, text="工单状态与财务信息")
         edit_frame.pack(fill="x", pady=5)
         edit_frame.columnconfigure(1, weight=1)
         edit_frame.columnconfigure(3, weight=1)
         
         r = 0
         # 第一列
-        tk.Label(edit_frame, text="最终实收", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
-        final_price_entry = tk.Entry(edit_frame)
-        final_price_entry.insert(0, str(final_price))
-        final_price_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
+        tk.Label(edit_frame, text="状态:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        status_var = tk.StringVar(value=status)
+        statuses = ['待检测', '检测中', '报价中', '维修中', '完成', '取消']
+        status_menu = ttk.Combobox(edit_frame, textvariable=status_var, values=statuses, state="readonly", width=18)
+        status_menu.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
         
         # 第二列
-        tk.Label(edit_frame, text="付款方式", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
-        payment_method_var = tk.StringVar(value=payment_method)
-        payment_methods = ['待定', '现金', '微信', '支付宝', '收款码', '欠款']
-        payment_method_menu = ttk.Combobox(edit_frame, textvariable=payment_method_var, values=payment_methods, state="readonly", width=18)
-        payment_method_menu.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
+        tk.Label(edit_frame, text="最终实收", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
+        final_price_entry = tk.Entry(edit_frame)
+        final_price_entry.insert(0, str(final_price))
+        final_price_entry.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
         r += 1
         
         # 第一列
-        tk.Label(edit_frame, text="配件成本(¥)", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
-        part_cost_entry = tk.Entry(edit_frame)
-        part_cost_entry.insert(0, str(part_cost))
-        part_cost_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
+        tk.Label(edit_frame, text="付款方式", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        payment_method_var = tk.StringVar(value=payment_method)
+        payment_methods = ['待定', '现金', '微信', '支付宝', '收款码', '欠款']
+        payment_method_menu = ttk.Combobox(edit_frame, textvariable=payment_method_var, values=payment_methods, state="readonly", width=18)
+        payment_method_menu.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
         
         # 第二列
         tk.Label(edit_frame, text="付款备注", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
@@ -1165,17 +1110,30 @@ class RecoveryManagerApp(tk.Tk):
         other_cost_entry.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
         r += 1
         
-        # 第一列
-        tk.Label(edit_frame, text="开票金额(¥)", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
-        invoice_amount_entry = tk.Entry(edit_frame)
-        invoice_amount_entry.insert(0, str(invoice_amount or 0))
-        invoice_amount_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
+        # 配件信息
+        parts_frame = ttk.LabelFrame(main_frame, text="配件信息")
+        parts_frame.pack(fill="x", pady=5)
+        parts_frame.columnconfigure(1, weight=1)
+        parts_frame.columnconfigure(3, weight=1)
         
-        # 第二列
-        tk.Label(edit_frame, text="开票日期", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
-        invoice_date_entry = tk.Entry(edit_frame)
-        invoice_date_entry.insert(0, invoice_date or '')
-        invoice_date_entry.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
+        r = 0
+        tk.Label(parts_frame, text="更换配件:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        parts_list = self.load_parts()
+        replaced_parts_var = tk.StringVar(value=replaced_parts)
+        replaced_parts_combo = ttk.Combobox(parts_frame, textvariable=replaced_parts_var, values=parts_list, state="normal", width=18)
+        replaced_parts_combo.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
+        
+        tk.Label(parts_frame, text="配件来源:", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=2, padx=5, pady=3, sticky="w")
+        sources_list = self.load_part_sources()
+        part_source_var = tk.StringVar(value=part_source)
+        part_source_combo = ttk.Combobox(parts_frame, textvariable=part_source_var, values=sources_list, state="normal", width=18)
+        part_source_combo.grid(row=r, column=3, padx=5, pady=3, sticky="ew")
+        r += 1
+        
+        tk.Label(parts_frame, text="配件成本(¥):", anchor="w", font=('Arial', 10, 'bold')).grid(row=r, column=0, padx=5, pady=3, sticky="w")
+        part_cost_entry = tk.Entry(parts_frame)
+        part_cost_entry.insert(0, str(part_cost))
+        part_cost_entry.grid(row=r, column=1, padx=5, pady=3, sticky="ew")
         r += 1
         
         financial_frame = ttk.LabelFrame(main_frame, text="财务摘要")
@@ -1195,15 +1153,13 @@ class RecoveryManagerApp(tk.Tk):
                        job_id, edit_fault_desc, edit_repair_details, status_var, final_price_entry, 
                        payment_method_var, payment_notes_entry, cost_entry, 
                        other_cost_entry, replaced_parts_var, part_source_var, 
-                       part_cost_entry, invoice_amount_entry, invoice_date_entry,
-                       replaced_parts_combo, part_source_combo, detail_win
+                       part_cost_entry, replaced_parts_combo, part_source_combo, detail_win
                    )).grid(row=0, column=0, padx=5)
 
     def _save_all_job_info_from_window(self, job_id, edit_fault_desc_widget, edit_repair_details_widget, status_var, 
                                        final_price_entry, payment_method_var, payment_notes_entry, 
                                        cost_entry, other_cost_entry, replaced_parts_var, part_source_var,
-                                       part_cost_entry, invoice_amount_entry, invoice_date_entry,
-                                       replaced_parts_combo, part_source_combo, window):
+                                       part_cost_entry, replaced_parts_combo, part_source_combo, window):
         """从详情窗口同时保存故障描述、维修详情、配件信息和更新工单状态及财务信息"""
         try:
             fault_desc = edit_fault_desc_widget.get("1.0", tk.END).strip()
@@ -1220,10 +1176,6 @@ class RecoveryManagerApp(tk.Tk):
             replaced_parts = replaced_parts_var.get().strip()
             part_source = part_source_var.get().strip()
             part_cost = float(part_cost_entry.get() or 0)
-            
-            # 获取开票信息
-            invoice_amount = float(invoice_amount_entry.get() or 0)
-            invoice_date = invoice_date_entry.get().strip()
             
             # 如果配件不在列表中，添加到列表
             if replaced_parts:
@@ -1244,21 +1196,19 @@ class RecoveryManagerApp(tk.Tk):
             update_query = '''
                 UPDATE job_orders 
                 SET fault_desc=?, repair_details=?, status=?, final_price=?, payment_method=?, 
-                    payment_notes=?, cost=?, other_cost=?, replaced_parts=?, part_source=?, part_cost=?,
-                    invoice_amount=?, invoice_date=?
+                    payment_notes=?, cost=?, other_cost=?, replaced_parts=?, part_source=?, part_cost=?
                 WHERE id=?
             '''
             if self.db.execute_query(update_query, (fault_desc, repair_details, status, final_price, 
                                                      payment_method, payment_notes, cost, 
-                                                     other_cost, replaced_parts, part_source, part_cost,
-                                                     invoice_amount, invoice_date, job_id)) is not None:
+                                                     other_cost, replaced_parts, part_source, part_cost, job_id)) is not None:
                 messagebox.showinfo("成功", f"工单 #{job_id} 的所有信息已保存！")
                 window.destroy()
                 self.refresh_job_list()
             else:
                 messagebox.showerror("失败", "保存工单信息失败。")
         except ValueError:
-            messagebox.showerror("错误", "请输入有效的数字（最终实收、内部成本、其他成本、配件成本、开票金额）。")
+            messagebox.showerror("错误", "请输入有效的数字（最终实收、内部成本、其他成本、配件成本）。")
 
     def get_client_names(self):
         """从数据库获取所有客户名称，用于 ComboBox 自动填充"""
@@ -1385,111 +1335,12 @@ class RecoveryManagerApp(tk.Tk):
         except Exception as e:
             logger.error(f"保存配件来源列表失败: {e}")
 
-    def load_units(self):
-        """从数据库加载单位列表"""
-        try:
-            results = self.db.fetch_all(
-                'SELECT config_value FROM config_data WHERE config_type = ? ORDER BY id',
-                ('unit',)
-            )
-            return [row[0] for row in results] if results else []
-        except Exception as e:
-            logger.error(f"加载单位列表失败: {e}")
-            return []
-    
-    def save_units(self, units):
-        """保存单位列表到数据库"""
-        try:
-            # 先删除所有现有单位
-            self.db.execute_query('DELETE FROM config_data WHERE config_type = ?', ('unit',))
-            # 插入新单位
-            for unit in units:
-                if unit.strip():
-                    self.db.execute_query(
-                        'INSERT INTO config_data (config_type, config_value) VALUES (?, ?)',
-                        ('unit', unit.strip())
-                    )
-        except Exception as e:
-            logger.error(f"保存单位列表失败: {e}")
-    
-    def load_departments(self):
-        """从数据库加载部门列表"""
-        try:
-            results = self.db.fetch_all(
-                'SELECT config_value FROM config_data WHERE config_type = ? ORDER BY id',
-                ('department',)
-            )
-            return [row[0] for row in results] if results else []
-        except Exception as e:
-            logger.error(f"加载部门列表失败: {e}")
-            return []
-    
-    def save_departments(self, departments):
-        """保存部门列表到数据库"""
-        try:
-            # 先删除所有现有部门
-            self.db.execute_query('DELETE FROM config_data WHERE config_type = ?', ('department',))
-            # 插入新部门
-            for department in departments:
-                if department.strip():
-                    self.db.execute_query(
-                        'INSERT INTO config_data (config_type, config_value) VALUES (?, ?)',
-                        ('department', department.strip())
-                    )
-        except Exception as e:
-            logger.error(f"保存部门列表失败: {e}")
-
-    def load_device_categories(self):
-        """从数据库加载设备类别列表"""
-        try:
-            results = self.db.fetch_all(
-                'SELECT config_value FROM config_data WHERE config_type = ? ORDER BY id',
-                ('device_category',)
-            )
-            categories = [row[0] for row in results] if results else []
-            # 确保有默认类别
-            default_categories = ['笔记本', '台式机', '服务器', '存储设备', '其他']
-            if not categories:
-                for default_category in default_categories:
-                    self.db.execute_query(
-                        'INSERT OR IGNORE INTO config_data (config_type, config_value) VALUES (?, ?)',
-                        ('device_category', default_category)
-                    )
-                return default_categories
-            # 确保默认类别都在列表中
-            for default_category in default_categories:
-                if default_category not in categories:
-                    self.db.execute_query(
-                        'INSERT OR IGNORE INTO config_data (config_type, config_value) VALUES (?, ?)',
-                        ('device_category', default_category)
-                    )
-                    categories.append(default_category)
-            return categories
-        except Exception as e:
-            logger.error(f"加载设备类别列表失败: {e}")
-            return ['笔记本', '台式机', '服务器', '存储设备', '其他']
-    
-    def save_device_categories(self, categories):
-        """保存设备类别列表到数据库"""
-        try:
-            # 先删除所有现有类别
-            self.db.execute_query('DELETE FROM config_data WHERE config_type = ?', ('device_category',))
-            # 插入新类别
-            for category in categories:
-                if category.strip():
-                    self.db.execute_query(
-                        'INSERT INTO config_data (config_type, config_value) VALUES (?, ?)',
-                        ('device_category', category.strip())
-                    )
-        except Exception as e:
-            logger.error(f"保存设备类别列表失败: {e}")
-
     def add_new_job_window(self):
         new_job_win = tk.Toplevel(self)
         new_job_win.title("新增工单")
         self._set_window_icon(new_job_win) # <-- 设置图标
         
-        self.center_window_manual(new_job_win, 500, 600)  # 增加窗口高度以容纳新字段
+        self.center_window_manual(new_job_win, 500, 500) 
         
         main_frame = ttk.Frame(new_job_win, padding="10")
         main_frame.pack(fill="both", expand=True)
@@ -1500,71 +1351,44 @@ class RecoveryManagerApp(tk.Tk):
         client_frame = ttk.LabelFrame(main_frame, text="客户信息")
         client_frame.pack(fill="x", pady=10)
         
-        # 第一行：联系人和电话
-        tk.Label(client_frame, text="联系人:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.new_client_name = ttk.Combobox(client_frame, width=18, values=client_names)
+        tk.Label(client_frame, text="姓名/公司:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.new_client_name = ttk.Combobox(client_frame, width=37, values=client_names)
         self.new_client_name.config(state='normal') 
         self.new_client_name.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        tk.Label(client_frame, text="电话:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        self.new_client_phone = tk.Entry(client_frame, width=18)
-        self.new_client_phone.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+        tk.Label(client_frame, text="联系电话:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.new_client_phone = tk.Entry(client_frame)
+        self.new_client_phone.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         
-        # 第二行：单位和部门
-        tk.Label(client_frame, text="单位:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        units_list = self.load_units()
-        self.new_client_unit = ttk.Combobox(client_frame, width=18, values=units_list, state="normal")
-        self.new_client_unit.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        
-        tk.Label(client_frame, text="部门:").grid(row=1, column=2, padx=5, pady=5, sticky="w")
-        departments_list = self.load_departments()
-        self.new_client_department = ttk.Combobox(client_frame, width=18, values=departments_list, state="normal")
-        self.new_client_department.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
-        
-        # 配置列权重，让输入框可以扩展
         client_frame.columnconfigure(1, weight=1)
-        client_frame.columnconfigure(3, weight=1)
 
-        device_frame = ttk.LabelFrame(main_frame, text="设备信息")
+        device_frame = ttk.LabelFrame(main_frame, text="设备及故障信息")
         device_frame.pack(fill="x", pady=10)
         
-        # 第一行：设备类别和品牌型号
-        tk.Label(device_frame, text="设备类别:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        categories_list = self.load_device_categories()
-        self.new_device_category = ttk.Combobox(device_frame, width=18, values=categories_list, state="normal")
-        self.new_device_category.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        
-        tk.Label(device_frame, text="品牌型号:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        self.new_device_info = tk.Entry(device_frame, width=18)
-        self.new_device_info.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+        tk.Label(device_frame, text="型号/容量:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.new_device_info = tk.Entry(device_frame)
+        self.new_device_info.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
         tk.Label(device_frame, text="序列号:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.new_serial_number = tk.Entry(device_frame)
         self.new_serial_number.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         
-        # 配置列权重，让输入框可以扩展
-        device_frame.columnconfigure(1, weight=1)
-        device_frame.columnconfigure(3, weight=1)
+        tk.Label(device_frame, text="初步报价(¥):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.new_initial_quote = tk.Entry(device_frame)
+        self.new_initial_quote.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        self.new_initial_quote.insert(0, "0.00")
         
-        tk.Label(device_frame, text="故障类型:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(device_frame, text="故障类型:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
         types = self.load_fault_types()
         self.new_recovery_type = ttk.Combobox(device_frame, values=types, state="normal")
         self.new_recovery_type.set('其他')
-        self.new_recovery_type.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
-        
-        # 紧急勾选框
-        self.new_is_urgent = tk.BooleanVar(value=False)
-        urgent_checkbox = tk.Checkbutton(device_frame, text="紧急", variable=self.new_is_urgent)
-        urgent_checkbox.grid(row=2, column=2, padx=5, pady=5, sticky="w")
+        self.new_recovery_type.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
-        tk.Label(device_frame, text="故障描述:").grid(row=3, column=0, padx=5, pady=5, sticky="nw")
+        tk.Label(device_frame, text="故障描述:").grid(row=4, column=0, padx=5, pady=5, sticky="nw")
         self.new_fault_desc = tk.Text(device_frame, height=5, width=40)
-        self.new_fault_desc.grid(row=3, column=1, columnspan=3, padx=5, pady=5, sticky="ew")
+        self.new_fault_desc.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
         
-        tk.Label(device_frame, text="初步报价(¥):").grid(row=4, column=0, padx=5, pady=5, sticky="w")
-        self.new_initial_quote = tk.Entry(device_frame)
-        self.new_initial_quote.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
-        self.new_initial_quote.insert(0, "0.00")
+        device_frame.columnconfigure(1, weight=1)
         
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", pady=20)
@@ -1579,15 +1403,11 @@ class RecoveryManagerApp(tk.Tk):
         """
         client_name = self.new_client_name.get().strip()
         client_phone = self.new_client_phone.get().strip()
-        client_unit = self.new_client_unit.get().strip()
-        client_department = self.new_client_department.get().strip()
         serial_number = self.new_serial_number.get().strip() 
         
-        device_category = self.new_device_category.get().strip()
         device_info = self.new_device_info.get().strip()
         initial_quote = self.new_initial_quote.get().strip()
         fault_desc = self.new_fault_desc.get("1.0", tk.END).strip()
-        is_urgent = 1 if self.new_is_urgent.get() else 0
         
         # 获取故障类型，如果不在列表中则添加
         recovery_type = self.new_recovery_type.get().strip()
@@ -1598,30 +1418,6 @@ class RecoveryManagerApp(tk.Tk):
                 self.save_fault_types(current_types)
                 # 更新Combobox的值列表
                 self.new_recovery_type['values'] = current_types
-        
-        # 如果单位不在列表中，添加到列表
-        if client_unit:
-            current_units = self.load_units()
-            if client_unit not in current_units:
-                current_units.append(client_unit)
-                self.save_units(current_units)
-                self.new_client_unit['values'] = current_units
-        
-        # 如果部门不在列表中，添加到列表
-        if client_department:
-            current_departments = self.load_departments()
-            if client_department not in current_departments:
-                current_departments.append(client_department)
-                self.save_departments(current_departments)
-                self.new_client_department['values'] = current_departments
-        
-        # 如果设备类别不在列表中，添加到列表
-        if device_category:
-            current_categories = self.load_device_categories()
-            if device_category not in current_categories:
-                current_categories.append(device_category)
-                self.save_device_categories(current_categories)
-                self.new_device_category['values'] = current_categories
         
         if not client_name or not device_info or not fault_desc:
             messagebox.showwarning("输入错误", "客户姓名、设备信息和故障描述为必填项！")
@@ -1640,10 +1436,9 @@ class RecoveryManagerApp(tk.Tk):
             client_data = self.db.fetch_one("SELECT id FROM clients WHERE phone = ?", (client_phone,))
             if client_data:
                 client_id = client_data[0]
-                # 如果电话匹配，更新姓名、单位、部门 (可能客户信息更新了)
+                # 如果电话匹配，更新姓名 (可能客户改名了)
                 self.db.execute_query(
-                    "UPDATE clients SET name = ?, unit = ?, department = ? WHERE id = ?", 
-                    (client_name, client_unit or '', client_department or '', client_id)
+                    "UPDATE clients SET name = ? WHERE id = ?", (client_name, client_id)
                 )
         
         # 2. 如果电话未匹配，尝试通过姓名查找现有客户 (解决 Combo Box 选中项)
@@ -1651,35 +1446,28 @@ class RecoveryManagerApp(tk.Tk):
              client_data = self.db.fetch_one("SELECT id, phone FROM clients WHERE name = ?", (client_name,))
              if client_data:
                  client_id, existing_phone = client_data
-                 # 如果姓名匹配，但输入了新的电话、单位或部门，则更新
+                 # 如果姓名匹配，但输入了新的电话，则更新电话
                  if client_phone and client_phone != existing_phone:
                      self.db.execute_query(
-                        "UPDATE clients SET phone = ?, unit = ?, department = ? WHERE id = ?", 
-                        (client_phone, client_unit or '', client_department or '', client_id)
-                    )
-                 elif client_unit or client_department:
-                     self.db.execute_query(
-                        "UPDATE clients SET unit = ?, department = ? WHERE id = ?", 
-                        (client_unit or '', client_department or '', client_id)
+                        "UPDATE clients SET phone = ? WHERE id = ?", (client_phone, client_id)
                     )
         
         # 3. 如果以上都没有匹配到，则创建新客户
         if client_id is None:
             client_id = self.db.execute_query(
-                "INSERT INTO clients (name, phone, unit, department) VALUES (?, ?, ?, ?)", 
-                (client_name, client_phone or '', client_unit or '', client_department or '')
+                "INSERT INTO clients (name, phone) VALUES (?, ?)", (client_name, client_phone or '')
             )
             
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         job_id = self.db.execute_query(
             '''
             INSERT INTO job_orders 
-            (client_id, serial_number, device_info, device_category, fault_desc, fault_type, status, initial_quote, final_price, 
-             created_at, cost, other_cost, repair_details, payment_method, payment_notes, is_urgent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, '', '待定', '', ?)
+            (client_id, serial_number, device_info, fault_desc, fault_type, status, initial_quote, final_price, 
+             created_at, cost, other_cost, repair_details, payment_method, payment_notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, '', '待定', '')
             ''',
-            (client_id, serial_number or '', device_info, device_category or '', fault_desc, recovery_type or '其他', '待检测', quote, quote, 
-             current_time, is_urgent)
+            (client_id, serial_number or '', device_info, fault_desc, recovery_type or '其他', '待检测', quote, quote, 
+             current_time)
         )
         
         if job_id:
