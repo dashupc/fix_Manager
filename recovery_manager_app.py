@@ -4,6 +4,7 @@ from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import logging
 import os
 from shutil import copyfile
 import smtplib
@@ -15,11 +16,31 @@ import threading
 import time as time_module
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageDraw
-import pystray
-import webbrowser
 
-from dateutil.relativedelta import relativedelta 
+from dateutil.relativedelta import relativedelta
+
+# 配置日志系统（必须在其他导入之前）
+LOG_FILE = 'app.log'
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 导入 PIL（用于系统托盘图标）
+try:
+    from PIL import Image, ImageDraw
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    logger.warning("PIL/Pillow 未安装，系统托盘图标功能将不可用")
+
+import pystray
+import webbrowser 
 
 
 DATABASE_NAME = 'recovery_manager.db'
@@ -144,16 +165,24 @@ class DatabaseManager:
             self.conn.commit()
             return self.cursor.lastrowid
         except sqlite3.Error as e:
-            print(f"数据库错误: {e}")
+            logger.error(f"数据库执行错误: {e}, 查询: {query[:100]}")
             return None
 
     def fetch_all(self, query, params=()):
-        self.cursor.execute(query, params)
-        return self.cursor.fetchall()
+        try:
+            self.cursor.execute(query, params)
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            logger.error(f"数据库查询错误 (fetch_all): {e}, 查询: {query[:100]}")
+            return []
 
     def fetch_one(self, query, params=()):
-        self.cursor.execute(query, params)
-        return self.cursor.fetchone()
+        try:
+            self.cursor.execute(query, params)
+            return self.cursor.fetchone()
+        except sqlite3.Error as e:
+            logger.error(f"数据库查询错误 (fetch_one): {e}, 查询: {query[:100]}")
+            return None
 
 
 class RecoveryManagerApp(tk.Tk):
@@ -260,12 +289,12 @@ class RecoveryManagerApp(tk.Tk):
                     except:
                         window.wm_iconbitmap(bitmap=full_ico_path)
             except Exception as e:
-                # 图标设置失败，打印错误信息用于调试
-                print(f"图标设置失败: {e}, 路径: {full_ico_path}")
+                # 图标设置失败，记录错误信息用于调试
+                logger.warning(f"图标设置失败: {e}, 路径: {full_ico_path}")
                 pass
         else:
             # 图标文件不存在
-            print(f"图标文件不存在: {full_ico_path}")
+            logger.warning(f"图标文件不存在: {full_ico_path}")
             pass
             
     def center_window_manual(self, window, width, height):
@@ -285,18 +314,28 @@ class RecoveryManagerApp(tk.Tk):
     
     def create_tray_image(self):
         """创建系统托盘图标"""
+        if not PIL_AVAILABLE:
+            # 如果 PIL 不可用，返回 None，系统托盘功能将被禁用
+            logger.warning("PIL 不可用，无法创建系统托盘图标")
+            return None
+            
         try:
             icon_path = self._get_icon_path()
             if os.path.exists(icon_path):
                 image = Image.open(icon_path)
                 return image
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"加载图标文件失败: {e}")
+        
         # 如果无法加载图标，创建一个简单的图标
-        image = Image.new('RGB', (64, 64), color='white')
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([16, 16, 48, 48], fill='blue')
-        return image
+        try:
+            image = Image.new('RGB', (64, 64), color='white')
+            draw = ImageDraw.Draw(image)
+            draw.rectangle([16, 16, 48, 48], fill='blue')
+            return image
+        except Exception as e:
+            logger.error(f"创建默认图标失败: {e}")
+            return None
     
     def _get_icon_path(self):
         """获取图标路径"""
@@ -308,8 +347,15 @@ class RecoveryManagerApp(tk.Tk):
     
     def setup_tray_icon(self):
         """设置系统托盘图标"""
+        if not PIL_AVAILABLE:
+            logger.warning("系统托盘功能不可用（PIL 未安装）")
+            return
+            
         try:
             image = self.create_tray_image()
+            if image is None:
+                logger.warning("无法创建托盘图标，系统托盘功能将被禁用")
+                return
             
             def show_window_action(icon, item):
                 """显示窗口的菜单项动作"""
@@ -337,7 +383,7 @@ class RecoveryManagerApp(tk.Tk):
             self.tray_thread = threading.Thread(target=run_tray, daemon=True)
             self.tray_thread.start()
         except Exception as e:
-            print(f"系统托盘设置失败: {e}")
+            logger.error(f"系统托盘设置失败: {e}")
     
     def show_window(self, icon=None, item=None):
         """从托盘恢复窗口"""
@@ -735,7 +781,7 @@ class RecoveryManagerApp(tk.Tk):
         self.backup_timer.daemon = True 
         self.backup_timer.start()
         
-        print(f"定时备份已安排，下一次运行时间: {next_run_time_str}")
+        logger.info(f"定时备份已安排，下一次运行时间: {next_run_time_str}")
 
 
     def perform_daily_backup(self):
@@ -748,7 +794,7 @@ class RecoveryManagerApp(tk.Tk):
             self.db.conn.commit()
             self.db.conn.close() 
         except Exception as e:
-            print(f"【定时备份警告】尝试关闭主连接失败: {e}")
+            logger.warning(f"【定时备份警告】尝试关闭主连接失败: {e}")
             pass
 
         self.after(0, lambda: self.status_bar.config(text=f"🔄 正在执行自动备份..."))
@@ -768,7 +814,7 @@ class RecoveryManagerApp(tk.Tk):
                     self.settings['recipient_email'],
                     backup_filename
                 )
-                print(f"【定时备份成功】备份文件 {backup_filename} 已成功发送到邮箱。")
+                logger.info(f"【定时备份成功】备份文件 {backup_filename} 已成功发送到邮箱。")
                 success = True # 标记为成功
                 
             except Exception as e:
@@ -779,13 +825,13 @@ class RecoveryManagerApp(tk.Tk):
                 elif 'SMTPConnectError' in str(e):
                      error_msg = "SMTP连接失败"
                 
-                print(f"【定时备份失败】邮件发送错误: {e}")
+                logger.error(f"【定时备份失败】邮件发送错误: {e}")
                 # 更新状态栏：邮件发送失败
                 self.after(0, lambda: self.status_bar.config(text=f"❌ 自动备份失败 ({error_msg})"))
             
         except Exception as e:
             # 本地文件创建失败
-            print(f"【定时备份失败】创建本地备份文件失败: {e}")
+            logger.error(f"【定时备份失败】创建本地备份文件失败: {e}")
             # 更新状态栏：本地文件创建失败
             self.after(0, lambda: self.status_bar.config(text=f"❌ 自动备份失败 (本地文件创建错误: {e})"))
 
@@ -802,7 +848,7 @@ class RecoveryManagerApp(tk.Tk):
                     os.remove(backup_filename)
                 except Exception as e:
                     # 仅打印警告，不影响主流程
-                    print(f"【定时备份警告】清理临时文件失败: {e}")
+                    logger.warning(f"【定时备份警告】清理临时文件失败: {e}")
             
             # 5. 在主线程中重新打开数据库连接，并重新安排下一次备份
             self.after(0, lambda: setattr(self, 'db', DatabaseManager(DATABASE_NAME)))
@@ -1199,7 +1245,7 @@ class RecoveryManagerApp(tk.Tk):
                     types.append(default_type)
             return types
         except Exception as e:
-            print(f"加载故障类型列表失败: {e}")
+            logger.error(f"加载故障类型列表失败: {e}")
             return ['不加电', '通电不显示', '数据恢复', '其他']
     
     def save_fault_types(self, types):
@@ -1215,7 +1261,7 @@ class RecoveryManagerApp(tk.Tk):
                         ('fault_type', fault_type.strip())
                     )
         except Exception as e:
-            print(f"保存故障类型列表失败: {e}")
+            logger.error(f"保存故障类型列表失败: {e}")
     
     def load_parts(self):
         """从数据库加载配件列表"""
@@ -1226,7 +1272,7 @@ class RecoveryManagerApp(tk.Tk):
             )
             return [row[0] for row in results] if results else []
         except Exception as e:
-            print(f"加载配件列表失败: {e}")
+            logger.error(f"加载配件列表失败: {e}")
             return []
     
     def save_parts(self, parts):
@@ -1242,7 +1288,7 @@ class RecoveryManagerApp(tk.Tk):
                         ('part', part.strip())
                     )
         except Exception as e:
-            print(f"保存配件列表失败: {e}")
+            logger.error(f"保存配件列表失败: {e}")
     
     def load_part_sources(self):
         """从数据库加载配件来源列表"""
@@ -1271,7 +1317,7 @@ class RecoveryManagerApp(tk.Tk):
                     sources.append(default_source)
             return sources
         except Exception as e:
-            print(f"加载配件来源列表失败: {e}")
+            logger.error(f"加载配件来源列表失败: {e}")
             return ['自购', '客户提供', '其他']
     
     def save_part_sources(self, sources):
@@ -1287,7 +1333,7 @@ class RecoveryManagerApp(tk.Tk):
                         ('part_source', source.strip())
                     )
         except Exception as e:
-            print(f"保存配件来源列表失败: {e}")
+            logger.error(f"保存配件来源列表失败: {e}")
 
     def add_new_job_window(self):
         new_job_win = tk.Toplevel(self)
@@ -1425,7 +1471,7 @@ class RecoveryManagerApp(tk.Tk):
         )
         
         if job_id:
-            print(f"✅ 新工单 #{job_id} 已创建！初步报价 (¥{quote:.2f}) 已自动填充至最终实收。")
+            logger.info(f"✅ 新工单 #{job_id} 已创建！初步报价 (¥{quote:.2f}) 已自动填充至最终实收。")
             self.refresh_job_list()
             self.refresh_client_list()
             window.destroy()

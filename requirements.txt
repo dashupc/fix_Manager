@@ -1,0 +1,12 @@
+# 维修管理系统 - Python 依赖包列表
+
+# 核心依赖
+Pillow>=12.0.0          # 图像处理库（用于系统托盘图标）
+pystray>=0.19.0         # 系统托盘图标支持
+python-dateutil>=2.9.0  # 日期时间处理
+
+# 说明：
+# - tkinter 是 Python 标准库，无需安装
+# - sqlite3 是 Python 标准库，无需安装
+# - email, smtplib, ssl 是 Python 标准库，无需安装
+
