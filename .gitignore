@@ -1,77 +1,83 @@
-# Python
+### ── Python Runtime ───────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
 *.so
 .Python
 
-# 虚拟环境
+### ── Virtual Environments ────────────────────────
 venv/
+.venv/
 env/
 ENV/
-.venv/
+env.*/
 
-# 构建和分发
+### ── Build / Distribution ────────────────────────
 build/
 dist/
 *.egg-info/
 *.egg
 *.whl
 
-# PyInstaller
+### ── PyInstaller / Executables ───────────────────
 *.spec
 *.exe
+*.dll
+*.manifest
+*.pyz
+*.pkg
+*.toc
 
-# 数据库文件（包含敏感数据）
+### ── Databases / Local Data ──────────────────────
 *.db
-*.sqlite
-*.sqlite3
+*.sqlite*
 *.db-journal
-
-# 配置文件（可能包含敏感信息）
 settings.txt
-*.config
-*.conf
-
-# IDE 和编辑器
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# 日志文件
-*.log
-*.log.*
-
-# 备份文件
-*.bak
-*.backup
+Job_Orders_Export_*.csv
+Recovery_Manager_Backup_*.db
 *_backup/
 *_副本.py
 
-# 临时文件
+### ── Logs / Backups ──────────────────────────────
+app.log
+*.log
+*.log.*
+*.bak
+*.backup
+
+### ── Temporary Files ─────────────────────────────
 *.tmp
 *.temp
 .cache/
+~$*
 
-# 操作系统文件
+### ── IDE / Editor Config ─────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+### ── OS Artifacts ────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
+Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# 测试覆盖率
+### ── Coverage / Test Artifacts ───────────────────
 .coverage
 htmlcov/
 .pytest_cache/
 
-# 环境变量文件
+### ── Environment / Secrets ───────────────────────
 .env
-.env.local
-
+.env.*
+*.config
+*.conf
